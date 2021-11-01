@@ -9,14 +9,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{metadata, File};
 use std::hash::{Hash, Hasher};
 use std::io::Read;
+use std::path::PathBuf;
 use std::str;
 use unicode_normalization::UnicodeNormalization;
 
 const SPACES_FACTOR: usize = 6;
 
-fn get_raw_dict(name: String, resource_dir: &str) -> Vec<u8> {
-    let dict_path_elts = vec![resource_dir.to_string(), name];
-    let dict_path = dict_path_elts.join("/");
+fn get_raw_dict(name: &str, resource_dir: &str) -> Vec<u8> {
+    let dict_path: PathBuf = [resource_dir, name].iter().collect();
     let mut f = File::open(&dict_path).expect("no file found");
     let metadata = metadata(&dict_path).expect("unable to read metadata");
     let mut buffer = vec![0; metadata.len() as usize];
@@ -34,7 +34,7 @@ fn last_word(prefix: &[u8], spaces: &[usize]) -> String {
 }
 
 fn anagrams(
-    input_size: usize,
+    max_spaces: usize,
     input: &[u8],
     prefix: &[u8],
     spaces: &[usize],
@@ -83,19 +83,14 @@ fn anagrams(
 
     let mut nb_results = 0;
 
-    let mut i = 0;
-    while i < input.len() {
+    for (i, c) in input.iter().enumerate() {
         rest.clear();
-        let mut j = 0;
-        while j < input.len() {
+        for (j, r) in input.iter().enumerate() {
             if j != i {
-                rest.push(input[j]);
+                rest.push(*r);
             }
-            j += 1;
         }
-
-        cur.push(input[i]);
-        i += 1;
+        cur.push(*c);
 
         let key = last_word(&cur, spaces);
         let mut prefixes = trie.iter_prefix(key.as_bytes()).take(1);
@@ -108,14 +103,14 @@ fn anagrams(
         }
 
         // Try also with a longer prefix.
-        nb_results += anagrams(input_size, &rest, &cur, spaces, trie, output);
+        nb_results += anagrams(max_spaces, &rest, &cur, spaces, trie, output);
 
         if trie.contains(&key) {
             // Current prefix is a known word. Add a space and continue.
             let mut new_spaces = spaces.to_vec();
             new_spaces.push(cur.len());
-            if spaces.len() < input_size / SPACES_FACTOR {
-                nb_results += anagrams(input_size, &rest, &cur, &new_spaces, trie, output);
+            if spaces.len() < max_spaces {
+                nb_results += anagrams(max_spaces, &rest, &cur, &new_spaces, trie, output);
             }
         }
 
@@ -160,7 +155,7 @@ fn main() {
 
     let txtfile = format!("{}.txt", lang);
 
-    let raw_dict_fr = get_raw_dict(txtfile, res_dir);
+    let raw_dict_fr = get_raw_dict(&txtfile, res_dir);
     let mut trie = PatriciaSet::new();
 
     let mut i = 0;
@@ -181,7 +176,7 @@ fn main() {
     let input_vec = input.replace(" ", "").as_bytes().to_vec();
     let mut outputs = HashMap::new();
     anagrams(
-        input_vec.len(),
+        input_vec.len() / SPACES_FACTOR + 1,
         &input_vec,
         &Vec::new(),
         &Vec::new(),
