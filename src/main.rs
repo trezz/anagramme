@@ -3,8 +3,10 @@ extern crate unicode_normalization;
 
 use clap::{App, Arg};
 use patricia_tree::PatriciaSet;
-use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::fs::{metadata, File};
+use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::str;
 use unicode_normalization::UnicodeNormalization;
@@ -29,54 +31,84 @@ fn last_word(prefix: &Vec<u8>, spaces: &Vec<usize>) -> String {
 }
 
 fn anagrams(
-    input: Vec<u8>,
-    prefix: Vec<u8>,
-    spaces: Vec<usize>,
+    input_size: usize,
+    input: &Vec<u8>,
+    prefix: &Vec<u8>,
+    spaces: &Vec<usize>,
     trie: &PatriciaSet,
-    output: &mut Vec<HashSet<String>>,
+    output: &mut HashMap<u64, HashSet<String>>,
 ) {
     if input.len() == 0 {
         let key = last_word(&prefix, &spaces);
         if !trie.contains(&key) {
             return;
         }
+
+        let mut hasher = DefaultHasher::new();
         let mut result = HashSet::new();
         let mut i = 0;
-        for space in &spaces {
-            result.insert(String::from(str::from_utf8(&prefix[i..*space]).unwrap()));
+        for space in spaces {
+            let part = String::from(str::from_utf8(&prefix[i..*space]).unwrap());
+            part.hash(&mut hasher);
+            result.insert(part);
             i = *space;
         }
-        result.insert(String::from(
-            str::from_utf8(&prefix[i..prefix.len()]).unwrap(),
-        ));
+        let part = String::from(str::from_utf8(&prefix[i..prefix.len()]).unwrap());
+        part.hash(&mut hasher);
+        let hash = hasher.finish();
+        if output.contains_key(&hash) {
+            return;
+        }
 
-        println!("--> {:?}", result);
-        output.push(result);
+        print!("-");
+        result.insert(part);
+        output.insert(hasher.finish(), result);
         return;
     }
 
+    let mut rest = Vec::new();
+    rest.reserve(input.len() - 1);
+
+    let mut cur = prefix.to_vec();
+    cur.reserve(input.len());
+
     let mut i = 0;
     while i < input.len() {
-        let mut rest = input[0..i].to_vec();
-        if i + 1 < input.len() {
-            rest.append(&mut input[i + 1..input.len()].to_vec());
+        rest.clear();
+        let mut j = 0;
+        while j < input.len() {
+            if j != i {
+                rest.push(input[j]);
+            }
+            j += 1;
         }
 
-        let mut new_prefix = prefix.to_vec();
-        new_prefix.push(input[i]);
+        cur.push(input[i]);
+        i += 1;
 
-        let key = last_word(&new_prefix, &spaces);
+        let key = last_word(&cur, &spaces);
+        let mut prefixes = trie.iter_prefix(&key.as_bytes()).take(1);
+        match prefixes.next() {
+            Some(_) => {}
+            None => {
+                cur.pop();
+                continue;
+            }
+        }
+
         if trie.contains(&key) {
             // Current prefix is a known word. Add a space and continue.
             let mut new_spaces = spaces.to_vec();
-            new_spaces.push(new_prefix.len());
-            anagrams(rest.to_vec(), new_prefix.to_vec(), new_spaces, trie, output);
+            new_spaces.push(cur.len());
+            if spaces.len() < input_size / 4 {
+                anagrams(input_size, &rest, &cur, &new_spaces, trie, output);
+            }
         }
 
-        i += 1;
-
         // Try also with a longer prefix.
-        anagrams(rest, new_prefix, spaces.to_vec(), trie, output);
+        anagrams(input_size, &rest, &cur, spaces, trie, output);
+
+        cur.pop();
     }
 }
 
@@ -123,11 +155,18 @@ fn main() {
 
     let mut input_vec = input.as_bytes().to_vec();
     input_vec.sort();
-    let mut outputs = Vec::new();
-    anagrams(input_vec, Vec::new(), Vec::new(), &trie, &mut outputs);
+    let mut outputs = HashMap::new();
+    anagrams(
+        input_vec.len(),
+        &input_vec,
+        &Vec::new(),
+        &Vec::new(),
+        &trie,
+        &mut outputs,
+    );
 
     let mut results = HashSet::new();
-    for result in outputs {
+    for (_, result) in outputs {
         let mut tmp = Vec::from_iter(result);
         tmp.sort();
         let s = tmp.join(" ");
