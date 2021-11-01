@@ -11,8 +11,10 @@ use std::io::Read;
 use std::str;
 use unicode_normalization::UnicodeNormalization;
 
-fn get_raw_dict(name: &str, resource_dir: &str) -> Vec<u8> {
-    let dict_path_elts = vec![resource_dir.to_string(), name.to_string()];
+const SPACES_FACTOR: usize = 6;
+
+fn get_raw_dict(name: String, resource_dir: &str) -> Vec<u8> {
+    let dict_path_elts = vec![resource_dir.to_string(), name];
     let dict_path = dict_path_elts.join("/");
     let mut f = File::open(&dict_path).expect("no file found");
     let metadata = metadata(&dict_path).expect("unable to read metadata");
@@ -36,34 +38,40 @@ fn anagrams(
     prefix: &Vec<u8>,
     spaces: &Vec<usize>,
     trie: &PatriciaSet,
-    output: &mut HashMap<u64, HashSet<String>>,
-) {
+    output: &mut HashMap<u64, Vec<String>>,
+) -> usize {
     if input.len() == 0 {
         let key = last_word(&prefix, &spaces);
         if !trie.contains(&key) {
-            return;
+            return 0;
         }
 
-        let mut hasher = DefaultHasher::new();
-        let mut result = HashSet::new();
+        let mut result = Vec::new();
+        result.reserve(spaces.len() + 1);
         let mut i = 0;
         for space in spaces {
             let part = String::from(str::from_utf8(&prefix[i..*space]).unwrap());
-            part.hash(&mut hasher);
-            result.insert(part);
+            result.push(part);
             i = *space;
         }
         let part = String::from(str::from_utf8(&prefix[i..prefix.len()]).unwrap());
-        part.hash(&mut hasher);
+        result.push(part);
+
+        result.sort();
+
+        let mut hasher = DefaultHasher::new();
+        for r in result.iter() {
+            r.hash(&mut hasher);
+        }
         let hash = hasher.finish();
         if output.contains_key(&hash) {
-            return;
+            return 0;
         }
 
-        print!("-");
-        result.insert(part);
+        println!("{:?}", result);
+
         output.insert(hasher.finish(), result);
-        return;
+        return 1;
     }
 
     let mut rest = Vec::new();
@@ -71,6 +79,8 @@ fn anagrams(
 
     let mut cur = prefix.to_vec();
     cur.reserve(input.len());
+
+    let mut nb_results = 0;
 
     let mut i = 0;
     while i < input.len() {
@@ -96,20 +106,22 @@ fn anagrams(
             }
         }
 
+        // Try also with a longer prefix.
+        nb_results += anagrams(input_size, &rest, &cur, spaces, trie, output);
+
         if trie.contains(&key) {
             // Current prefix is a known word. Add a space and continue.
             let mut new_spaces = spaces.to_vec();
             new_spaces.push(cur.len());
-            if spaces.len() < input_size / 4 {
-                anagrams(input_size, &rest, &cur, &new_spaces, trie, output);
+            if spaces.len() < input_size / SPACES_FACTOR {
+                nb_results += anagrams(input_size, &rest, &cur, &new_spaces, trie, output);
             }
         }
 
-        // Try also with a longer prefix.
-        anagrams(input_size, &rest, &cur, spaces, trie, output);
-
         cur.pop();
     }
+
+    return nb_results;
 }
 
 fn main() {
@@ -125,6 +137,15 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("language")
+                .short("l")
+                .long("language")
+                .value_name("LANG")
+                .required(true)
+                .help("Language prefix (e.g. fr for french)")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("INPUT")
                 .help("Input sentence from which anagrams are tentatively found")
                 .required(true)
@@ -134,8 +155,11 @@ fn main() {
 
     let res_dir = matches.value_of("resource-dir").unwrap();
     let input = matches.value_of("INPUT").unwrap().to_lowercase();
+    let lang = matches.value_of("language").unwrap().to_lowercase();
 
-    let raw_dict_fr = get_raw_dict("fr.txt", res_dir);
+    let txtfile = format!("{}.txt", lang);
+
+    let raw_dict_fr = get_raw_dict(txtfile, res_dir);
     let mut trie = PatriciaSet::new();
 
     let mut i = 0;
@@ -153,8 +177,7 @@ fn main() {
         i += 1;
     }
 
-    let mut input_vec = input.as_bytes().to_vec();
-    input_vec.sort();
+    let input_vec = input.replace(" ", "").as_bytes().to_vec();
     let mut outputs = HashMap::new();
     anagrams(
         input_vec.len(),
@@ -167,17 +190,14 @@ fn main() {
 
     let mut results = HashSet::new();
     for (_, result) in outputs {
-        let mut tmp = Vec::from_iter(result);
-        tmp.sort();
-        let s = tmp.join(" ");
-        results.insert(s);
+        results.insert(Vec::from_iter(result).join(" "));
     }
 
     let mut ordered_results = Vec::new();
     for result in results {
         ordered_results.push(result);
     }
-    ordered_results.sort_by(|a, b| b.len().cmp(&a.len()));
+    ordered_results.sort_by(|a, b| b.matches(" ").count().cmp(&a.matches(" ").count()));
 
     for result in ordered_results {
         println!("{}", result);
