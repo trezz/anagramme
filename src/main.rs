@@ -152,19 +152,15 @@ fn main() {
     let raw_dict_fr = get_raw_dict(&txtfile, res_dir);
     let mut trie = PatriciaSet::new();
 
-    let mut i = 0;
     let mut start = 0;
-    while i < raw_dict_fr.len() {
-        if raw_dict_fr[i] == b'\n' {
+    for (i, c) in raw_dict_fr.iter().enumerate() {
+        if *c == b'\n' {
             let u8_word = &raw_dict_fr[start..i];
             let word = str::from_utf8(u8_word).unwrap();
             let ascii_word: String = word.nfd().filter(char::is_ascii).collect();
             trie.insert(ascii_word.to_lowercase());
-            i += 1;
-            start = i;
-            continue;
+            start = i + 1;
         }
-        i += 1;
     }
 
     let input_vec = input.replace(" ", "").as_bytes().to_vec();
