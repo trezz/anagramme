@@ -40,11 +40,11 @@ fn anagrams(
     spaces: &[usize],
     trie: &PatriciaSet,
     output: &mut HashMap<u64, Vec<String>>,
-) -> usize {
+) {
     if input.is_empty() {
         let key = last_word(prefix, spaces);
         if !trie.contains(&key) {
-            return 0;
+            return;
         }
 
         let mut result = Vec::new();
@@ -66,13 +66,13 @@ fn anagrams(
         }
         let hash = hasher.finish();
         if output.contains_key(&hash) {
-            return 0;
+            return;
         }
 
         println!("{:?}", result);
 
         output.insert(hasher.finish(), result);
-        return 1;
+        return;
     }
 
     let mut rest = Vec::new();
@@ -80,8 +80,6 @@ fn anagrams(
 
     let mut cur = prefix.to_vec();
     cur.reserve(input.len());
-
-    let mut nb_results = 0;
 
     for (i, c) in input.iter().enumerate() {
         rest.clear();
@@ -93,31 +91,27 @@ fn anagrams(
         cur.push(*c);
 
         let key = last_word(&cur, spaces);
-        let mut prefixes = trie.iter_prefix(key.as_bytes()).take(1);
-        match prefixes.next() {
-            Some(_) => {}
-            None => {
-                cur.pop();
-                continue;
-            }
+
+        if trie.iter_prefix(key.as_bytes()).take(1).count() == 0 {
+            // Backtrack as the current prefix isn't starting any valid word.
+            cur.pop();
+            continue;
         }
 
-        // Try also with a longer prefix.
-        nb_results += anagrams(max_spaces, &rest, &cur, spaces, trie, output);
+        // Try with a longer prefix.
+        anagrams(max_spaces, &rest, &cur, spaces, trie, output);
 
         if trie.contains(&key) {
             // Current prefix is a known word. Add a space and continue.
             let mut new_spaces = spaces.to_vec();
             new_spaces.push(cur.len());
             if spaces.len() < max_spaces {
-                nb_results += anagrams(max_spaces, &rest, &cur, &new_spaces, trie, output);
+                anagrams(max_spaces, &rest, &cur, &new_spaces, trie, output);
             }
         }
 
         cur.pop();
     }
-
-    nb_results
 }
 
 fn main() {
