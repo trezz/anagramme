@@ -3,6 +3,7 @@ extern crate unicode_normalization;
 
 use clap::{App, Arg};
 use patricia_tree::PatriciaSet;
+use std::cmp::Reverse;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fs::{metadata, File};
@@ -19,13 +20,13 @@ fn get_raw_dict(name: String, resource_dir: &str) -> Vec<u8> {
     let mut f = File::open(&dict_path).expect("no file found");
     let metadata = metadata(&dict_path).expect("unable to read metadata");
     let mut buffer = vec![0; metadata.len() as usize];
-    f.read(&mut buffer).expect("buffer overflow");
-    return buffer;
+    f.read_exact(&mut buffer).expect("buffer overflow");
+    buffer
 }
 
-fn last_word(prefix: &Vec<u8>, spaces: &Vec<usize>) -> String {
+fn last_word(prefix: &[u8], spaces: &[usize]) -> String {
     let mut i = 0;
-    if spaces.len() > 0 {
+    if !spaces.is_empty() {
         i = spaces[spaces.len() - 1];
     }
     let new_cur_prefix = prefix[i..prefix.len()].to_vec();
@@ -34,14 +35,14 @@ fn last_word(prefix: &Vec<u8>, spaces: &Vec<usize>) -> String {
 
 fn anagrams(
     input_size: usize,
-    input: &Vec<u8>,
-    prefix: &Vec<u8>,
-    spaces: &Vec<usize>,
+    input: &[u8],
+    prefix: &[u8],
+    spaces: &[usize],
     trie: &PatriciaSet,
     output: &mut HashMap<u64, Vec<String>>,
 ) -> usize {
-    if input.len() == 0 {
-        let key = last_word(&prefix, &spaces);
+    if input.is_empty() {
+        let key = last_word(prefix, spaces);
         if !trie.contains(&key) {
             return 0;
         }
@@ -96,8 +97,8 @@ fn anagrams(
         cur.push(input[i]);
         i += 1;
 
-        let key = last_word(&cur, &spaces);
-        let mut prefixes = trie.iter_prefix(&key.as_bytes()).take(1);
+        let key = last_word(&cur, spaces);
+        let mut prefixes = trie.iter_prefix(key.as_bytes()).take(1);
         match prefixes.next() {
             Some(_) => {}
             None => {
@@ -121,7 +122,7 @@ fn anagrams(
         cur.pop();
     }
 
-    return nb_results;
+    nb_results
 }
 
 fn main() {
@@ -165,7 +166,7 @@ fn main() {
     let mut i = 0;
     let mut start = 0;
     while i < raw_dict_fr.len() {
-        if raw_dict_fr[i] == '\n' as u8 {
+        if raw_dict_fr[i] == b'\n' {
             let u8_word = &raw_dict_fr[start..i];
             let word = str::from_utf8(u8_word).unwrap();
             let ascii_word: String = word.nfd().filter(char::is_ascii).collect();
@@ -197,7 +198,7 @@ fn main() {
     for result in results {
         ordered_results.push(result);
     }
-    ordered_results.sort_by(|a, b| b.matches(" ").count().cmp(&a.matches(" ").count()));
+    ordered_results.sort_by_key(|s| Reverse(s.matches(' ').count()));
 
     for result in ordered_results {
         println!("{}", result);
