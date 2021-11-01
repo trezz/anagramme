@@ -136,6 +136,14 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("hint")
+                .long("hint")
+                .value_name("HINT")
+                .required(false)
+                .help("Hint word or short sentense that is part of an anagram of the input")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("INPUT")
                 .help("Input sentence from which anagrams are tentatively found")
                 .required(true)
@@ -144,8 +152,13 @@ fn main() {
         .get_matches();
 
     let res_dir = matches.value_of("resource-dir").unwrap();
-    let input = matches.value_of("INPUT").unwrap().to_lowercase();
-    let lang = matches.value_of("language").unwrap().to_lowercase();
+    let input = matches.value_of("INPUT").unwrap().to_ascii_lowercase();
+    let lang = matches.value_of("language").unwrap().to_ascii_lowercase();
+    let hint = matches
+        .value_of("hint")
+        .or(Some(""))
+        .unwrap()
+        .to_ascii_lowercase();
 
     let txtfile = format!("{}.txt", lang);
 
@@ -163,7 +176,23 @@ fn main() {
         }
     }
 
-    let input_vec = input.replace(" ", "").as_bytes().to_vec();
+    let mut input_vec = Vec::new();
+    let mut tmp_hint_chars = hint.as_bytes().to_vec();
+
+    for c in input.replace(" ", "").as_bytes().to_vec() {
+        let mut keep = true;
+        for (i, h) in tmp_hint_chars.iter().enumerate() {
+            if *h == c {
+                tmp_hint_chars.remove(i);
+                keep = false;
+                break;
+            }
+        }
+        if keep {
+            input_vec.push(c);
+        }
+    }
+
     let mut outputs = HashMap::new();
     anagrams(
         input_vec.len() / SPACES_FACTOR + 1,
@@ -186,6 +215,6 @@ fn main() {
     ordered_results.sort_by_key(|s| Reverse(s.matches(' ').count()));
 
     for result in ordered_results {
-        println!("{}", result);
+        println!("{} {}", hint, result);
     }
 }
