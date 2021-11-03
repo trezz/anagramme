@@ -15,6 +15,8 @@ use unicode_normalization::UnicodeNormalization;
 
 const SPACES_FACTOR: usize = 6;
 
+// Opens dictionary file name 'name.txt' and located in 'resource_dir' and returns
+// its full content as a Vec<u8>.
 fn get_raw_dict(name: &str, resource_dir: &str) -> Vec<u8> {
     let dict_path: PathBuf = [resource_dir, name].iter().collect();
     let mut f = File::open(&dict_path).expect("no file found");
@@ -24,6 +26,8 @@ fn get_raw_dict(name: &str, resource_dir: &str) -> Vec<u8> {
     buffer
 }
 
+// Returns the last word of the given sentence, which it the characters of prefix
+// starting after the position of the last space in 'spaces'.
 fn last_word(prefix: &[u8], spaces: &[usize]) -> String {
     let mut i = 0;
     if !spaces.is_empty() {
@@ -33,7 +37,44 @@ fn last_word(prefix: &[u8], spaces: &[usize]) -> String {
     return String::from(str::from_utf8(&new_cur_prefix).unwrap());
 }
 
+// Splits the given 'letters' with spaces at positions given by 'spaces' and return
+// the split words in a Vec<String>.
+fn get_sentence(letters: &[u8], spaces: &[usize]) -> Vec<String> {
+    let mut result = Vec::new();
+    result.reserve(spaces.len() + 1);
+    let mut i = 0;
+    for space in spaces {
+        result.push(String::from(str::from_utf8(&letters[i..*space]).unwrap()));
+        i = *space;
+    }
+    result.push(String::from(str::from_utf8(&letters[i..]).unwrap()));
+    result.sort();
+
+    result
+}
+
+// Returns the hash sum of the elements of the given vec.
+fn compute_hash(v: &[String]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for item in v.iter() {
+        item.hash(&mut hasher);
+    }
+
+    hasher.finish()
+}
+
+// Finds anagrams of 'input' and fill 'output' with found ones.
+// At most 'max_spaces' are authorized in found anagrams.
 fn anagrams(
+    max_spaces: usize,
+    input: &[u8],
+    trie: &PatriciaSet,
+    output: &mut HashMap<u64, Vec<String>>,
+) {
+    anagrams_rec(max_spaces, input, &Vec::new(), &Vec::new(), trie, output);
+}
+
+fn anagrams_rec(
     max_spaces: usize,
     input: &[u8],
     prefix: &[u8],
@@ -46,39 +87,19 @@ fn anagrams(
         if !trie.contains(&key) {
             return;
         }
-
-        let mut result = Vec::new();
-        result.reserve(spaces.len() + 1);
-        let mut i = 0;
-        for space in spaces {
-            let part = String::from(str::from_utf8(&prefix[i..*space]).unwrap());
-            result.push(part);
-            i = *space;
-        }
-        let part = String::from(str::from_utf8(&prefix[i..prefix.len()]).unwrap());
-        result.push(part);
-
-        result.sort();
-
-        let mut hasher = DefaultHasher::new();
-        for r in result.iter() {
-            r.hash(&mut hasher);
-        }
-        let hash = hasher.finish();
+        let sentence = get_sentence(prefix, spaces);
+        let hash = compute_hash(&sentence);
         if output.contains_key(&hash) {
             return;
         }
-
-        println!("{:?}", result);
-
-        output.insert(hasher.finish(), result);
+        println!("--> {}", sentence.join(" "));
+        output.insert(hash, sentence);
         return;
     }
 
     let mut rest = Vec::new();
-    rest.reserve(input.len() - 1);
-
     let mut cur = prefix.to_vec();
+    rest.reserve(input.len() - 1);
     cur.reserve(input.len());
 
     for (i, c) in input.iter().enumerate() {
@@ -91,7 +112,6 @@ fn anagrams(
         cur.push(*c);
 
         let key = last_word(&cur, spaces);
-
         if trie.iter_prefix(key.as_bytes()).take(1).count() == 0 {
             // Backtrack as the current prefix isn't starting any valid word.
             cur.pop();
@@ -99,19 +119,57 @@ fn anagrams(
         }
 
         // Try with a longer prefix.
-        anagrams(max_spaces, &rest, &cur, spaces, trie, output);
-
+        anagrams_rec(max_spaces, &rest, &cur, spaces, trie, output);
         if trie.contains(&key) {
             // Current prefix is a known word. Add a space and continue.
             let mut new_spaces = spaces.to_vec();
             new_spaces.push(cur.len());
             if spaces.len() < max_spaces {
-                anagrams(max_spaces, &rest, &cur, &new_spaces, trie, output);
+                anagrams_rec(max_spaces, &rest, &cur, &new_spaces, trie, output);
             }
         }
-
         cur.pop();
     }
+}
+
+// Creates a Patricia trie from a dictionary raw content.
+fn trie_from_dict(dict: &[u8]) -> PatriciaSet {
+    let mut trie = PatriciaSet::new();
+
+    let mut start = 0;
+    for (i, c) in dict.iter().enumerate() {
+        if *c == b'\n' {
+            let u8_word = &dict[start..i];
+            let word = str::from_utf8(u8_word).unwrap();
+            let ascii_word: String = word.nfd().filter(char::is_ascii).collect();
+            trie.insert(ascii_word.to_lowercase());
+            start = i + 1;
+        }
+    }
+
+    trie
+}
+
+// Builds the input sentence as a Vec<u8>, removing the letters from 'hint'.
+fn make_input_vec(input: &str, hint: &str) -> Vec<u8> {
+    let mut v = Vec::new();
+    let mut tmp_hint_chars = hint.as_bytes().to_vec();
+
+    for c in input.replace(" ", "").as_bytes().to_vec() {
+        let mut keep = true;
+        for (i, h) in tmp_hint_chars.iter().enumerate() {
+            if *h == c {
+                tmp_hint_chars.remove(i);
+                keep = false;
+                break;
+            }
+        }
+        if keep {
+            v.push(c);
+        }
+    }
+
+    v
 }
 
 fn main() {
@@ -162,54 +220,21 @@ fn main() {
 
     let txtfile = format!("{}.txt", lang);
 
-    let raw_dict_fr = get_raw_dict(&txtfile, res_dir);
-    let mut trie = PatriciaSet::new();
+    let trie = trie_from_dict(&get_raw_dict(&txtfile, res_dir));
+    let in_vec = make_input_vec(&input, &hint);
 
-    let mut start = 0;
-    for (i, c) in raw_dict_fr.iter().enumerate() {
-        if *c == b'\n' {
-            let u8_word = &raw_dict_fr[start..i];
-            let word = str::from_utf8(u8_word).unwrap();
-            let ascii_word: String = word.nfd().filter(char::is_ascii).collect();
-            trie.insert(ascii_word.to_lowercase());
-            start = i + 1;
-        }
-    }
+    let max_spaces = in_vec.len() / SPACES_FACTOR + 1;
 
-    let mut input_vec = Vec::new();
-    let mut tmp_hint_chars = hint.as_bytes().to_vec();
+    let mut out = HashMap::new();
+    anagrams(max_spaces, &in_vec, &trie, &mut out);
 
-    for c in input.replace(" ", "").as_bytes().to_vec() {
-        let mut keep = true;
-        for (i, h) in tmp_hint_chars.iter().enumerate() {
-            if *h == c {
-                tmp_hint_chars.remove(i);
-                keep = false;
-                break;
-            }
-        }
-        if keep {
-            input_vec.push(c);
-        }
-    }
-
-    let mut outputs = HashMap::new();
-    anagrams(
-        input_vec.len() / SPACES_FACTOR + 1,
-        &input_vec,
-        &Vec::new(),
-        &Vec::new(),
-        &trie,
-        &mut outputs,
-    );
-
-    let mut results = HashSet::new();
-    for (_, result) in outputs {
-        results.insert(Vec::from_iter(result).join(" "));
+    let mut unique_results = HashSet::new();
+    for (_, result) in out {
+        unique_results.insert(Vec::from_iter(result).join(" "));
     }
 
     let mut ordered_results = Vec::new();
-    for result in results {
+    for result in unique_results {
         ordered_results.push(result);
     }
     ordered_results.sort_by_key(|s| Reverse(s.matches(' ').count()));
