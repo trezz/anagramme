@@ -48,7 +48,6 @@ fn get_sentence(letters: &[u8], spaces: &[usize]) -> Vec<String> {
         i = *space;
     }
     result.push(String::from(str::from_utf8(&letters[i..]).unwrap()));
-    result.sort();
 
     result
 }
@@ -71,36 +70,41 @@ fn anagrams(
     trie: &PatriciaSet,
     output: &mut HashMap<u64, Vec<String>>,
 ) {
-    anagrams_rec(max_spaces, input, &Vec::new(), &Vec::new(), trie, output);
+    anagrams_rec(
+        max_spaces,
+        input,
+        &mut Vec::new(),
+        &Vec::new(),
+        trie,
+        output,
+    );
 }
 
 fn anagrams_rec(
     max_spaces: usize,
     input: &[u8],
-    prefix: &[u8],
+    prefix: &mut Vec<u8>,
     spaces: &[usize],
     trie: &PatriciaSet,
     output: &mut HashMap<u64, Vec<String>>,
 ) {
     if input.is_empty() {
-        let key = last_word(prefix, spaces);
-        if !trie.contains(&key) {
+        let mut sentence = get_sentence(prefix, spaces);
+        if !trie.contains(&sentence[sentence.len() - 1]) {
             return;
         }
-        let sentence = get_sentence(prefix, spaces);
+        sentence.sort();
         let hash = compute_hash(&sentence);
         if output.contains_key(&hash) {
             return;
         }
-        println!("--> {}", sentence.join(" "));
+        //println!("--> {}", sentence.join(" "));
         output.insert(hash, sentence);
         return;
     }
 
     let mut rest = Vec::new();
-    let mut cur = prefix.to_vec();
     rest.reserve(input.len() - 1);
-    cur.reserve(input.len());
 
     for (i, c) in input.iter().enumerate() {
         rest.clear();
@@ -109,27 +113,27 @@ fn anagrams_rec(
                 rest.push(*r);
             }
         }
-        cur.push(*c);
+        prefix.push(*c);
 
-        let key = last_word(&cur, spaces);
+        let key = last_word(prefix, spaces);
         if trie.iter_prefix(key.as_bytes()).take(1).count() == 0 {
             // Backtrack as the current prefix isn't starting any valid word.
-            cur.pop();
+            prefix.pop();
             continue;
         }
 
         // Try with a longer prefix.
-        anagrams_rec(max_spaces, &rest, &cur, spaces, trie, output);
+        anagrams_rec(max_spaces, &rest, prefix, spaces, trie, output);
         if trie.contains(&key) && spaces.len() < max_spaces {
             // Current prefix is a known word. Add a space and continue.
             let new_spaces = spaces
                 .iter()
                 .copied()
-                .chain([cur.len()])
+                .chain([prefix.len()])
                 .collect::<Vec<_>>();
-            anagrams_rec(max_spaces, &rest, &cur, &new_spaces, trie, output);
+            anagrams_rec(max_spaces, &rest, prefix, &new_spaces, trie, output);
         }
-        cur.pop();
+        prefix.pop();
     }
 }
 
