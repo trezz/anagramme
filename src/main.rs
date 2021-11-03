@@ -4,10 +4,8 @@ extern crate unicode_normalization;
 use clap::{App, Arg};
 use patricia_tree::PatriciaSet;
 use std::cmp::Reverse;
-use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs::{metadata, File};
-use std::hash::{Hash, Hasher};
 use std::io::Read;
 use std::path::PathBuf;
 use std::str;
@@ -52,30 +50,27 @@ fn get_sentence(letters: &[u8], spaces: &[usize]) -> Vec<String> {
     result
 }
 
-// Returns the hash sum of the elements of the given vec.
-fn compute_hash(v: &[String]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    for item in v.iter() {
-        item.hash(&mut hasher);
+// Creates a string pattern <key>-<rest>.
+fn compute_pattern(key: &str, rest: &[u8]) -> String {
+    let mut pattern = String::from(key);
+    pattern.push('-');
+    for c in rest {
+        pattern.push(*c as char);
     }
 
-    hasher.finish()
+    pattern
 }
 
 // Finds anagrams of 'input' and fill 'output' with found ones.
 // At most 'max_spaces' are authorized in found anagrams.
-fn anagrams(
-    max_spaces: usize,
-    input: &[u8],
-    trie: &PatriciaSet,
-    output: &mut HashMap<u64, Vec<String>>,
-) {
+fn anagrams(max_spaces: usize, input: &[u8], trie: &PatriciaSet, output: &mut Vec<Vec<String>>) {
     anagrams_rec(
         max_spaces,
         input,
         &mut Vec::new(),
         &Vec::new(),
         trie,
+        &mut HashSet::new(),
         output,
     );
 }
@@ -86,7 +81,8 @@ fn anagrams_rec(
     prefix: &mut Vec<u8>,
     spaces: &[usize],
     trie: &PatriciaSet,
-    output: &mut HashMap<u64, Vec<String>>,
+    cache: &mut HashSet<String>,
+    output: &mut Vec<Vec<String>>,
 ) {
     if input.is_empty() {
         let mut sentence = get_sentence(prefix, spaces);
@@ -94,12 +90,8 @@ fn anagrams_rec(
             return;
         }
         sentence.sort();
-        let hash = compute_hash(&sentence);
-        if output.contains_key(&hash) {
-            return;
-        }
-        //println!("--> {}", sentence.join(" "));
-        output.insert(hash, sentence);
+        println!("--> {}", sentence.join(" "));
+        output.push(sentence);
         return;
     }
 
@@ -114,16 +106,22 @@ fn anagrams_rec(
             }
         }
         prefix.push(*c);
+        rest.sort_unstable();
 
         let key = last_word(prefix, spaces);
-        if trie.iter_prefix(key.as_bytes()).take(1).count() == 0 {
-            // Backtrack as the current prefix isn't starting any valid word.
+        let pattern = compute_pattern(&key, &rest);
+
+        if cache.contains(&pattern) || trie.iter_prefix(key.as_bytes()).take(1).count() == 0 {
+            // Backtrack as the current prefix isn't starting any valid word or we already
+            // encountered this pattern.
             prefix.pop();
             continue;
         }
 
+        cache.insert(pattern);
+
         // Try with a longer prefix.
-        anagrams_rec(max_spaces, &rest, prefix, spaces, trie, output);
+        anagrams_rec(max_spaces, &rest, prefix, spaces, trie, cache, output);
         if trie.contains(&key) && spaces.len() < max_spaces {
             // Current prefix is a known word. Add a space and continue.
             let new_spaces = spaces
@@ -131,7 +129,7 @@ fn anagrams_rec(
                 .copied()
                 .chain([prefix.len()])
                 .collect::<Vec<_>>();
-            anagrams_rec(max_spaces, &rest, prefix, &new_spaces, trie, output);
+            anagrams_rec(max_spaces, &rest, prefix, &new_spaces, trie, cache, output);
         }
         prefix.pop();
     }
@@ -230,11 +228,11 @@ fn main() {
 
     let max_spaces = in_vec.len() / SPACES_FACTOR + 1;
 
-    let mut out = HashMap::new();
+    let mut out = Vec::new();
     anagrams(max_spaces, &in_vec, &trie, &mut out);
 
     let mut unique_results = HashSet::new();
-    for (_, result) in out {
+    for result in out {
         unique_results.insert(Vec::from_iter(result).join(" "));
     }
 
