@@ -120,13 +120,14 @@ fn anagrams_rec(
 
         // Try with a longer prefix.
         anagrams_rec(max_spaces, &rest, &cur, spaces, trie, output);
-        if trie.contains(&key) {
+        if trie.contains(&key) && spaces.len() < max_spaces {
             // Current prefix is a known word. Add a space and continue.
-            let mut new_spaces = spaces.to_vec();
-            new_spaces.push(cur.len());
-            if spaces.len() < max_spaces {
-                anagrams_rec(max_spaces, &rest, &cur, &new_spaces, trie, output);
-            }
+            let new_spaces = spaces
+                .iter()
+                .copied()
+                .chain([cur.len()])
+                .collect::<Vec<_>>();
+            anagrams_rec(max_spaces, &rest, &cur, &new_spaces, trie, output);
         }
         cur.pop();
     }
